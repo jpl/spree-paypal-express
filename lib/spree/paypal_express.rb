@@ -99,10 +99,10 @@ module Spree::PaypalExpress
     gateway = paypal_gateway
 
     if Spree::Config[:auto_capture]
-      ppx_auth_response = gateway.purchase((@order.total*100).to_i, opts)
+      ppx_auth_response = gateway.purchase((@order.total*100).round.to_i, opts)
       txn_type = PaypalTxn::TxnType::CAPTURE
     else
-      ppx_auth_response = gateway.authorize((@order.total*100).to_i, opts)
+      ppx_auth_response = gateway.authorize((@order.total*100).round.to_i, opts)
       txn_type = PaypalTxn::TxnType::AUTHORIZE
     end
 
@@ -195,13 +195,13 @@ module Spree::PaypalExpress
   def order_opts(order, payment_method, stage)
     items = order.line_items.map do |item|
       tax = paypal_variant_tax(item.price, item.variant)
-      price = (item.price * 100).to_i # convert for gateway
-      tax   = (tax        * 100).to_i # truncate the tax slice
+      price = (item.price * 100).round.to_i # convert for gateway
+      tax   = (tax        * 100).round.to_i # truncate the tax slice
       { :name        => item.variant.product.name,
         :description => item.variant.product.description[0..120],
         :sku         => item.variant.sku,
         :qty         => item.quantity,
-        :amount      => price - tax,
+        :amount      => price,
         :tax         => tax,
         :weight      => item.variant.weight,
         :height      => item.variant.height,
@@ -214,7 +214,7 @@ module Spree::PaypalExpress
         :description => credit.description,
         :sku         => credit.id,
         :qty         => 1,
-        :amount      => (credit.amount*100).to_i }
+        :amount      => (credit.amount*100).round.to_i }
     end
 
     items.concat credits
@@ -233,7 +233,7 @@ module Spree::PaypalExpress
       opts[:subtotal] = opts[:items].map {|i| i[:amount] * i[:qty] }.sum
       opts[:tax]      = opts[:items].map {|i| i[:tax]    * i[:qty] }.sum
       opts[:handling] = 0
-      opts[:shipping] = (order.ship_total*100).to_i
+      opts[:shipping] = (order.ship_total*100).round.to_i
 
       # overall total
       opts[:money]    = opts.slice(:subtotal, :tax, :shipping, :handling).values.sum
@@ -242,21 +242,35 @@ module Spree::PaypalExpress
       opts[:callback_timeout] = 3
     elsif  stage == "payment"
       #use real totals are we are paying via paypal (spree checkout almost complete)
-      opts[:subtotal] = ((order.item_total + order.credits.total)*100).to_i
-      opts[:tax]      = (order.tax_total*100).to_i
-      opts[:shipping] = (order.ship_total*100).to_i
+      opts[:subtotal] = ((order.item_total + order.credits.total)*100).round.to_i
+      opts[:tax]      = (order.tax_total*100).round.to_i
+      opts[:shipping] = (order.ship_total*100).round.to_i
       opts[:handling] = 0
-      opts[:money] = (order.total*100).to_i
+      opts[:money] = (order.total*100).round.to_i
     end
 
     opts
   end
 
+  def applicable_rates
+    return @applicable_rates if @applicable_rates
+    
+    origin = Country.find(@order.bill_address.country)
+    calcs = Calculator::Vat.find(:all, :include => {:calculable => :zone}).select {
+      |vat| vat.calculable.zone.country_list.include?(origin)
+    }
+    @applicable_rates = calcs.collect { |calc| calc.calculable }
+  end
+  
   # hook for supplying tax amount for a single unit of a variant
   # expects the sale price from the line_item and the variant itself, since
   #   line_item price and variant price can diverge in time
   def paypal_variant_tax(sale_price, variant)
-    0.0
+    return 0.0 if applicable_rates.nil?
+    return 0.0 unless tax_category = variant.product.tax_category
+    return 0.0 unless rate = applicable_rates.find { | vat_rate | vat_rate.tax_category_id = tax_category.id }
+    
+    (variant.price * rate.amount)
   end
 
   def address_options(order)
