@@ -55,7 +55,7 @@ module Spree::PaypalExpress
                            :payer_country => @ppx_details.params["payer_country"],
                            :payer_status => @ppx_details.params["payer_status"])
 
-      @order.checkout.special_instructions = @ppx_details.params["note"]
+      @order.checkout.special_instructions = @ppx_details.params["note"] unless @ppx_details.params["note"].nil? || @ppx_details.params["note"].empty?
 
       #@order.update_attribute(:user, current_user)
       unless payment_method.preferred_no_shipping
