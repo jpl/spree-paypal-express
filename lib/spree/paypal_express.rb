@@ -198,7 +198,7 @@ module Spree::PaypalExpress
       price = (item.price * 100).round.to_i # convert for gateway
       tax   = (tax        * 100).round.to_i # truncate the tax slice
       { :name        => item.variant.product.name,
-        :description => item.variant.product.description[0..120],
+        :description => item.variant.product.description ? item.variant.product.description[0..120] : "",
         :sku         => item.variant.sku,
         :qty         => item.quantity,
         :amount      => price,
